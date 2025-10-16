@@ -1,0 +1,9 @@
+node_modules/
+playwright-report/
+test-results/
+.DS_Store
+*.log
+.env
+.env.local
+package-lock.json
+playwright/.cache/
