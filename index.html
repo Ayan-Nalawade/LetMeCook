@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LetMeCook - AI Study Platform</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="apiKeyModal" class="modal">
+        <div class="modal-content">
+            <h2>Welcome to LetMeCook</h2>
+            <p>Enter your Gemini API key to get started</p>
+            <input type="password" id="apiKeyInput" placeholder="Enter Gemini API Key">
+            <button id="validateApiKey">Validate & Continue</button>
+            <div id="validationStatus"></div>
+            <p class="hint">Don't have a key? <a href="https://aistudio.google.com/app/apikey" target="_blank">Get one here</a></p>
+        </div>
+    </div>
+
+    <div id="mainApp" class="hidden">
+        <header>
+            <h1>LetMeCook</h1>
+            <div class="header-actions">
+                <button id="changeApiKey" class="btn-secondary">Change API Key</button>
+            </div>
+        </header>
+
+        <div class="container">
+            <section id="uploadSection">
+                <h2>Upload Your Study Material</h2>
+                <div class="upload-area">
+                    <input type="file" id="fileInput" accept=".pdf,.txt,.md,.html,.pptx,.pptm,.js,.py,.json,.csv,.xml" multiple>
+                    <label for="fileInput" class="file-label">
+                        <span>Choose files or drag & drop</span>
+                        <small>PDF, TXT, MD, PPTX, and more (max 20MB each)</small>
+                    </label>
+                </div>
+                <div class="divider">OR</div>
+                <textarea id="textInput" placeholder="Paste your study material here..." rows="8"></textarea>
+                <button id="processContent" class="btn-primary">Process Content</button>
+                <div id="uploadStatus"></div>
+            </section>
+
+            <section id="modeSelection" class="hidden">
+                <h2>Select Learning Mode</h2>
+                <div class="mode-cards">
+                    <div class="mode-card" data-mode="study">
+                        <h3>Study Mode</h3>
+                        <p>Comprehensive learning with explanations and summaries</p>
+                    </div>
+                    <div class="mode-card" data-mode="exam">
+                        <h3>Exam Mode</h3>
+                        <p>Test yourself with challenging questions</p>
+                    </div>
+                    <div class="mode-card" data-mode="flashcard">
+                        <h3>Flashcard Mode</h3>
+                        <p>Quick recall with flashcards and multiple choice</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="contentArea" class="hidden">
+                <div class="content-header">
+                    <button id="backToModes" class="btn-secondary">← Back to Modes</button>
+                    <h2 id="currentModeTitle"></h2>
+                </div>
+                <div id="contentDisplay"></div>
+            </section>
+        </div>
+    </div>
+
+    <div id="loadingOverlay" class="hidden">
+        <div class="spinner"></div>
+        <p id="loadingText">Processing...</p>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
