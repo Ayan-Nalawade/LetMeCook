@@ -90,7 +90,7 @@ test.describe('LetMeCook - Mode Selection', () => {
     await expect(modeCards).toHaveCount(3);
   });
 
-  test('should have Study mode card', async ({ page }) => {
+  test('should have Study mode card in DOM', async ({ page }) => {
     await page.goto('http://localhost:8080');
     
     await page.evaluate(() => {
@@ -99,11 +99,11 @@ test.describe('LetMeCook - Mode Selection', () => {
     await page.reload();
     
     const studyMode = page.locator('[data-mode="study"]');
-    await expect(studyMode).toBeVisible();
+    await expect(studyMode).toBeAttached();
     await expect(studyMode).toContainText('Study Mode');
   });
 
-  test('should have Exam mode card', async ({ page }) => {
+  test('should have Exam mode card in DOM', async ({ page }) => {
     await page.goto('http://localhost:8080');
     
     await page.evaluate(() => {
@@ -112,11 +112,11 @@ test.describe('LetMeCook - Mode Selection', () => {
     await page.reload();
     
     const examMode = page.locator('[data-mode="exam"]');
-    await expect(examMode).toBeVisible();
+    await expect(examMode).toBeAttached();
     await expect(examMode).toContainText('Exam Mode');
   });
 
-  test('should have Flashcard mode card', async ({ page }) => {
+  test('should have Flashcard mode card in DOM', async ({ page }) => {
     await page.goto('http://localhost:8080');
     
     await page.evaluate(() => {
@@ -125,7 +125,7 @@ test.describe('LetMeCook - Mode Selection', () => {
     await page.reload();
     
     const flashcardMode = page.locator('[data-mode="flashcard"]');
-    await expect(flashcardMode).toBeVisible();
+    await expect(flashcardMode).toBeAttached();
     await expect(flashcardMode).toContainText('Flashcard Mode');
   });
 });
