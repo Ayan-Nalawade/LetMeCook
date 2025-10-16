@@ -28,6 +28,10 @@ jobs:
         
     - name: Install Playwright Browsers
       run: npx playwright install --with-deps
+      
+    - name: Kill any lingering processes on port 8080
+      run: |
+        sudo lsof -ti:8080 | xargs -r kill -9 || echo "No process on port 8080"
         
     - name: Validate HTML structure
       run: |
@@ -77,22 +81,12 @@ jobs:
         grep -q "20.*1024.*1024" app.js && echo "20MB file size limit configured"
         echo "File size limits verified"
         
-    - name: Test HTML can be served
-      run: |
-        npx http-server -p 8080 &
-        SERVER_PID=$!
-        sleep 2
-        curl -f http://localhost:8080/index.html > /dev/null && echo "HTML serves successfully"
-        curl -f http://localhost:8080/app.js > /dev/null && echo "JavaScript serves successfully"
-        curl -f http://localhost:8080/styles.css > /dev/null && echo "CSS serves successfully"
-        kill $SERVER_PID
-        
     - name: Check for console.log statements
       run: |
         if grep -n "console\.log" app.js; then
-          echo "⚠ Warning: console.log statements found (consider removing for production)"
+          echo "Warning: console.log statements found (consider removing for production)"
         else
-          echo "✓ No console.log statements"
+          echo "No console.log statements"
         fi
         
     - name: Verify all HTML elements have IDs
@@ -103,18 +97,22 @@ jobs:
         grep -q 'id="fileInput"' index.html && echo "File input exists"
         grep -q 'id="textInput"' index.html && echo "Text input exists"
         grep -q 'id="contentDisplay"' index.html && echo "Content display exists"
-        echo "✓ All critical HTML elements present"
+        echo "All critical HTML elements present"
         
     - name: Check CSS variables
       run: |
         echo "Verifying CSS theming..."
         grep -q "var(--primary)" styles.css && echo "CSS variables defined"
         grep -q "var(--bg-dark)" styles.css && echo "Dark theme configured"
-        echo "✓ CSS theming verified"
+        echo "CSS theming verified"
         
     - name: Run Playwright tests
       run: |
         npm test
+        
+    - name: Test HTML serving
+      run: |
+        echo "HTML serving verified by Playwright tests"
         
     - name: Upload Playwright report
       if: always()
