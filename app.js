@@ -304,22 +304,40 @@ async function generateExamQuestions() {
     toggleLoadingScreen(true, 'Creating exam questions...');
 
     try {
-        const examPrompt = `Based on this content, generate 5 challenging exam-style questions. For each question:
-1. Ask a thought-provoking question that tests deep understanding
-2. Provide the model answer after the user responds
+        const examPrompt = `Generate 5 challenging questions (mix of open-ended and multiple choice) to test understanding of this content.
 
 Content:
 ${processedMaterial.combined}
 
-Format your response as:
-Q1: [question]
+For OPEN-ENDED questions, format as:
+Q[number]: [question text]
 ---
-Q2: [question]
+
+For MULTIPLE CHOICE questions, format as:
+Q[number]: [question text]
+A) [option]
+B) [option]
+C) [option]
+D) [option]
+CORRECT: [letter]
 ---
-(etc.)`;
+
+Do NOT include any preamble text like "Here are questions..." or explanations. Just provide the questions directly.`;
 
         const response = await callGeminiAPI(examPrompt, processedMaterial.files);
-        const questions = response.split('---').filter(q => q.trim());
+        
+        // Clean up any preamble
+        let cleanedResponse = response;
+        const preambles = [
+            /^.*?(?:here are|okay,?\s*here are).*?questions.*?$/im,
+            /^.*?based on.*?content.*?$/im,
+            /^.*?following questions.*?$/im
+        ];
+        preambles.forEach(pattern => {
+            cleanedResponse = cleanedResponse.replace(pattern, '');
+        });
+        
+        const questions = cleanedResponse.split('---').filter(q => q.trim());
         
         window.examQuestions = questions.map(q => q.replace(/Q\d+:\s*/, '').trim());
         window.currentExamIndex = 0;
@@ -337,6 +355,52 @@ Q2: [question]
 function renderExamInterface() {
     const currentQuestion = window.examQuestions[window.currentExamIndex];
     
+    // Check if it's an MCQ (has A), B), C), D) options)
+    const isMCQ = /[A-D]\)/.test(currentQuestion);
+    
+    let questionHTML = '';
+    
+    if (isMCQ) {
+        // Parse MCQ
+        const lines = currentQuestion.split('\n');
+        const questionText = lines[0];
+        const options = lines.filter(line => /^[A-D]\)/.test(line.trim()));
+        const correctMatch = currentQuestion.match(/CORRECT:\s*([A-D])/i);
+        const correctAnswer = correctMatch ? correctMatch[1].toUpperCase() : '';
+        
+        // Store correct answer for later validation
+        window.currentExamCorrect = correctAnswer;
+        window.currentExamType = 'mcq';
+        
+        questionHTML = `
+            <h4>Question ${window.currentExamIndex + 1}</h4>
+            <p>${convertMarkdownToHTML(questionText)}</p>
+            <div class="mcq-options" id="examMCQOptions">
+                ${options.map((opt, idx) => {
+                    const letter = String.fromCharCode(65 + idx); // A, B, C, D
+                    const text = opt.replace(/^[A-D]\)\s*/, '');
+                    return `<div class="mcq-option" data-answer="${letter}" onclick="selectExamMCQ('${letter}')">${opt}</div>`;
+                }).join('')}
+            </div>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button class="btn-primary" style="flex: 1;" onclick="submitCurrentExamAnswer()">Submit Answer</button>
+                <button class="btn-secondary" onclick="skipExamQuestion()">Skip →</button>
+            </div>
+        `;
+    } else {
+        // Open-ended question
+        window.currentExamType = 'open';
+        questionHTML = `
+            <h4>Question ${window.currentExamIndex + 1}</h4>
+            <p>${convertMarkdownToHTML(currentQuestion)}</p>
+            <textarea placeholder="Your answer..." rows="6" id="currentExamAnswer"></textarea>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button class="btn-primary" style="flex: 1;" onclick="submitCurrentExamAnswer()">Submit Answer</button>
+                <button class="btn-secondary" onclick="skipExamQuestion()">Skip →</button>
+            </div>
+        `;
+    }
+    
     elements.contentRenderer.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
             <div style="color: var(--text-secondary);">
@@ -347,35 +411,82 @@ function renderExamInterface() {
             </div>
         </div>
         <div class="exam-question">
-            <h4>Question ${window.currentExamIndex + 1}</h4>
-            <p>${convertMarkdownToHTML(currentQuestion)}</p>
-            <textarea placeholder="Your answer..." rows="6" id="currentExamAnswer"></textarea>
-            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
-                <button class="btn-primary" style="flex: 1;" onclick="submitCurrentExamAnswer()">Submit Answer</button>
-                <button class="btn-secondary" onclick="skipExamQuestion()">Skip →</button>
-            </div>
+            ${questionHTML}
             <div id="currentExamFeedback" class="exam-feedback hidden"></div>
         </div>
     `;
 }
 
+function selectExamMCQ(letter) {
+    window.currentExamSelected = letter;
+    const options = document.querySelectorAll('#examMCQOptions .mcq-option');
+    options.forEach(opt => {
+        opt.classList.remove('selected');
+        if (opt.dataset.answer === letter) {
+            opt.classList.add('selected');
+        }
+    });
+}
+
 async function submitCurrentExamAnswer() {
-    const userAnswer = document.getElementById('currentExamAnswer').value.trim();
     const feedbackElement = document.getElementById('currentExamFeedback');
     const submitBtn = document.querySelector('.exam-question .btn-primary');
     
-    if (!userAnswer) {
-        feedbackElement.textContent = 'Please provide an answer';
+    let userAnswer = '';
+    let isCorrect = false;
+    
+    // Check if it's MCQ or open-ended
+    if (window.currentExamType === 'mcq') {
+        if (!window.currentExamSelected) {
+            feedbackElement.textContent = 'Please select an answer';
+            feedbackElement.classList.remove('hidden');
+            return;
+        }
+        
+        userAnswer = window.currentExamSelected;
+        isCorrect = (userAnswer === window.currentExamCorrect);
+        
+        // Show visual feedback on MCQ options
+        const options = document.querySelectorAll('#examMCQOptions .mcq-option');
+        options.forEach(opt => {
+            opt.style.pointerEvents = 'none';
+            if (opt.dataset.answer === window.currentExamCorrect) {
+                opt.classList.add('correct');
+            } else if (opt.dataset.answer === userAnswer && !isCorrect) {
+                opt.classList.add('incorrect');
+            }
+        });
+        
+        window.examAttempted++;
+        if (isCorrect) {
+            window.examScore++;
+        }
+        
+        feedbackElement.innerHTML = isCorrect 
+            ? '<strong>CORRECT!</strong> Well done!' 
+            : `<strong>INCORRECT.</strong> The correct answer is <strong>${window.currentExamCorrect}</strong>.`;
         feedbackElement.classList.remove('hidden');
-        return;
-    }
+        
+        submitBtn.textContent = 'Next Question →';
+        submitBtn.onclick = moveToNextExamQuestion;
+        
+    } else {
+        // Open-ended question
+        const answerTextarea = document.getElementById('currentExamAnswer');
+        userAnswer = answerTextarea ? answerTextarea.value.trim() : '';
+        
+        if (!userAnswer) {
+            feedbackElement.textContent = 'Please provide an answer';
+            feedbackElement.classList.remove('hidden');
+            return;
+        }
 
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Evaluating...';
-    toggleLoadingScreen(true, 'Evaluating your answer...');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Evaluating...';
+        toggleLoadingScreen(true, 'Evaluating your answer...');
 
-    try {
-        const evaluationPrompt = `Review this exam answer. Respond in this exact format:
+        try {
+            const evaluationPrompt = `Review this exam answer. Do NOT include preamble text. Respond in this exact format:
 
 RESULT: [CORRECT/PARTIALLY CORRECT/INCORRECT]
 
@@ -390,30 +501,31 @@ Student Answer: ${userAnswer}
 Context:
 ${processedMaterial.combined}`;
 
-        const feedback = await callGeminiAPI(evaluationPrompt, []);
-        
-        const isCorrect = feedback.toUpperCase().includes('RESULT: CORRECT') && 
-                         !feedback.toUpperCase().includes('RESULT: PARTIALLY') &&
-                         !feedback.toUpperCase().includes('RESULT: INCORRECT');
-        
-        window.examAttempted++;
-        if (isCorrect) {
-            window.examScore++;
+            const feedback = await callGeminiAPI(evaluationPrompt, []);
+            
+            isCorrect = feedback.toUpperCase().includes('RESULT: CORRECT') && 
+                             !feedback.toUpperCase().includes('RESULT: PARTIALLY') &&
+                             !feedback.toUpperCase().includes('RESULT: INCORRECT');
+            
+            window.examAttempted++;
+            if (isCorrect) {
+                window.examScore++;
+            }
+            
+            feedbackElement.innerHTML = `${convertMarkdownToHTML(feedback)}`;
+            feedbackElement.classList.remove('hidden');
+            
+            submitBtn.textContent = 'Next Question →';
+            submitBtn.onclick = moveToNextExamQuestion;
+            
+        } catch (error) {
+            feedbackElement.innerHTML = `<span style="color: var(--danger);">Error: ${error.message}</span>`;
+            feedbackElement.classList.remove('hidden');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit Answer';
+        } finally {
+            toggleLoadingScreen(false);
         }
-        
-        feedbackElement.innerHTML = `${convertMarkdownToHTML(feedback)}`;
-        feedbackElement.classList.remove('hidden');
-        
-        submitBtn.textContent = 'Next Question →';
-        submitBtn.onclick = moveToNextExamQuestion;
-        
-    } catch (error) {
-        feedbackElement.innerHTML = `<span style="color: var(--danger);">Error: ${error.message}</span>`;
-        feedbackElement.classList.remove('hidden');
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Submit Answer';
-    } finally {
-        toggleLoadingScreen(false);
     }
 }
 
@@ -424,20 +536,40 @@ async function moveToNextExamQuestion() {
         toggleLoadingScreen(true, 'Generating more questions...');
         
         try {
-            const examPrompt = `Based on this content, generate 5 MORE challenging exam-style questions that are DIFFERENT from previous ones. Focus on different aspects and concepts.
+            const examPrompt = `Generate 5 MORE challenging questions (mix of open-ended and multiple choice) that are DIFFERENT from previous ones.
 
 Content:
 ${processedMaterial.combined}
 
-Format your response as:
-Q1: [question]
+For OPEN-ENDED questions, format as:
+Q[number]: [question text]
 ---
-Q2: [question]
+
+For MULTIPLE CHOICE questions, format as:
+Q[number]: [question text]
+A) [option]
+B) [option]
+C) [option]
+D) [option]
+CORRECT: [letter]
 ---
-(etc.)`;
+
+Do NOT include any preamble text. Just provide the questions directly.`;
 
             const response = await callGeminiAPI(examPrompt, processedMaterial.files);
-            const newQuestions = response.split('---').filter(q => q.trim()).map(q => q.replace(/Q\d+:\s*/, '').trim());
+            
+            // Clean up any preamble
+            let cleanedResponse = response;
+            const preambles = [
+                /^.*?(?:here are|okay,?\s*here are).*?questions.*?$/im,
+                /^.*?based on.*?content.*?$/im,
+                /^.*?following questions.*?$/im
+            ];
+            preambles.forEach(pattern => {
+                cleanedResponse = cleanedResponse.replace(pattern, '');
+            });
+            
+            const newQuestions = cleanedResponse.split('---').filter(q => q.trim()).map(q => q.replace(/Q\d+:\s*/, '').trim());
             
             window.examQuestions.push(...newQuestions);
         } catch (error) {
@@ -457,17 +589,35 @@ function skipExamQuestion() {
     if (window.currentExamIndex >= window.examQuestions.length) {
         toggleLoadingScreen(true, 'Generating more questions...');
         
-        callGeminiAPI(`Based on this content, generate 5 MORE challenging exam-style questions that are DIFFERENT from previous ones.
+        callGeminiAPI(`Generate 5 MORE challenging questions (mix of open-ended and multiple choice) that are DIFFERENT from previous ones.
 
 Content:
 ${processedMaterial.combined}
 
-Format: Q1: [question]
+For OPEN-ENDED: Q[number]: [question]
 ---
-Q2: [question]
----`, processedMaterial.files)
+For MULTIPLE CHOICE: Q[number]: [question]
+A) [option]
+B) [option]
+C) [option]
+D) [option]
+CORRECT: [letter]
+---
+
+No preamble text.`, processedMaterial.files)
             .then(response => {
-                const newQuestions = response.split('---').filter(q => q.trim()).map(q => q.replace(/Q\d+:\s*/, '').trim());
+                // Clean up any preamble
+                let cleanedResponse = response;
+                const preambles = [
+                    /^.*?(?:here are|okay,?\s*here are).*?questions.*?$/im,
+                    /^.*?based on.*?content.*?$/im,
+                    /^.*?following questions.*?$/im
+                ];
+                preambles.forEach(pattern => {
+                    cleanedResponse = cleanedResponse.replace(pattern, '');
+                });
+                
+                const newQuestions = cleanedResponse.split('---').filter(q => q.trim()).map(q => q.replace(/Q\d+:\s*/, '').trim());
                 window.examQuestions.push(...newQuestions);
                 renderExamInterface();
             })
