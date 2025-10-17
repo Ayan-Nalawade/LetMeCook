@@ -301,28 +301,42 @@ ${processedMaterial.combined}`;
 }
 
 async function generateExamQuestions() {
-    toggleLoadingScreen(true, 'Creating exam questions...');
+    toggleLoadingScreen(true, 'Creating exam content...');
 
     try {
-        const examPrompt = `Generate 5 challenging questions (mix of open-ended and multiple choice) to test understanding of this content.
+        // Generate both open-ended questions and MCQs
+        const examPrompt = `Generate exam content with:
+
+1. 5 challenging open-ended questions
+2. 15 multiple choice questions with 4 options each
 
 Content:
 ${processedMaterial.combined}
 
-For OPEN-ENDED questions, format as:
-Q[number]: [question text]
----
+CRITICAL: Separate each question with --- on a new line.
 
-For MULTIPLE CHOICE questions, format as:
-Q[number]: [question text]
+For OPEN-ENDED questions, format EXACTLY as:
+Q1: [question text]
+---
+Q2: [question text]
+---
+Q3: [question text]
+---
+(continue for all 5 questions)
+
+For MULTIPLE CHOICE questions, format EXACTLY as:
+MCQ1: [question text]
 A) [option]
 B) [option]
 C) [option]
 D) [option]
 CORRECT: [letter]
+EXPLANATION: [brief explanation]
 ---
+MCQ2: [question text]
+(continue for all 15 questions)
 
-Do NOT include any preamble text like "Here are questions..." or explanations. Just provide the questions directly.`;
+Do NOT include any preamble text. Just provide the questions directly.`;
 
         const response = await callGeminiAPI(examPrompt, processedMaterial.files);
         
@@ -337,14 +351,83 @@ Do NOT include any preamble text like "Here are questions..." or explanations. J
             cleanedResponse = cleanedResponse.replace(pattern, '');
         });
         
-        const questions = cleanedResponse.split('---').filter(q => q.trim());
+        // Split into open-ended and MCQ sections - look for MCQ1: or just the first MCQ pattern
+        let openEndedSection = cleanedResponse;
+        let mcqSection = '';
         
-        window.examQuestions = questions.map(q => q.replace(/Q\d+:\s*/, '').trim());
+        // Try to find where MCQs start
+        const mcqStartMatch = cleanedResponse.match(/MCQ1:/i);
+        if (mcqStartMatch) {
+            openEndedSection = cleanedResponse.substring(0, mcqStartMatch.index);
+            mcqSection = cleanedResponse.substring(mcqStartMatch.index);
+        }
+        
+        // Parse open-ended questions - handle both --- separator and Q1:/Q2: format
+        let openEndedQuestions = [];
+        
+        // First try splitting by ---
+        if (openEndedSection.includes('---')) {
+            openEndedQuestions = openEndedSection
+                .split('---')
+                .filter(q => q.trim())
+                .map(q => q.replace(/Q\d+:\s*/i, '').trim())
+                .filter(q => q.length > 0 && !q.match(/^[A-D]\)/)); // Exclude MCQ options
+        } else {
+            // If no ---, split by Q1:, Q2:, Q3:, etc.
+            const questionMatches = openEndedSection.match(/Q\d+:[\s\S]*?(?=Q\d+:|$)/gi);
+            if (questionMatches) {
+                openEndedQuestions = questionMatches
+                    .map(q => {
+                        // Remove MCQ options if they snuck in
+                        let cleaned = q.replace(/Q\d+:\s*/i, '').trim();
+                        // Stop at first MCQ-style option
+                        const mcqMatch = cleaned.match(/\n[A-D]\)/);
+                        if (mcqMatch) {
+                            cleaned = cleaned.substring(0, mcqMatch.index).trim();
+                        }
+                        return cleaned;
+                    })
+                    .filter(q => q.length > 0);
+            } else {
+                // Fallback: treat entire section as one question
+                let cleaned = openEndedSection.replace(/Q\d+:\s*/i, '').trim();
+                // Stop at first MCQ-style option
+                const mcqMatch = cleaned.match(/\n[A-D]\)/);
+                if (mcqMatch) {
+                    cleaned = cleaned.substring(0, mcqMatch.index).trim();
+                }
+                if (cleaned.length > 0) {
+                    openEndedQuestions = [cleaned];
+                }
+            }
+        }
+        
+        // Parse MCQs
+        const mcqs = mcqSection
+            .split('---')
+            .filter(q => q.trim())
+            .map(q => {
+                const lines = q.split('\n').filter(l => l.trim());
+                const question = lines[0]?.replace(/MCQ\d+:\s*/i, '').trim() || '';
+                const options = lines.filter(l => /^[A-D]\)/i.test(l.trim()));
+                const correctMatch = q.match(/CORRECT:\s*([A-D])/i);
+                const correct = correctMatch ? correctMatch[1].toUpperCase() : '';
+                const explanationMatch = q.match(/EXPLANATION:\s*(.+)/i);
+                const explanation = explanationMatch ? explanationMatch[1].trim() : '';
+                return { question, options, correct, explanation };
+            })
+            .filter(mcq => mcq.question && mcq.options.length > 0);
+        
+        window.examQuestions = openEndedQuestions;
+        window.examMCQs = mcqs;
         window.currentExamIndex = 0;
         window.examScore = 0;
         window.examAttempted = 0;
+        window.currentExamMCQIndex = 0;
+        window.examMCQScore = 0;
+        window.examMCQAttempted = 0;
         
-        renderExamInterface();
+        renderExamModeSelection();
     } catch (error) {
         elements.contentRenderer.innerHTML = `<p style="color: var(--danger);">Error: ${error.message}</p>`;
     } finally {
@@ -352,45 +435,55 @@ Do NOT include any preamble text like "Here are questions..." or explanations. J
     }
 }
 
+function renderExamModeSelection() {
+    elements.contentRenderer.innerHTML = `
+        <div style="text-align: center; margin-bottom: 2rem;">
+            <h3 style="margin-bottom: 1.5rem; font-size: 1.5rem; text-transform: uppercase; letter-spacing: -1px;">Choose Exam Type</h3>
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+                <button class="btn-primary" onclick="startOpenEndedExam()" style="min-width: 200px;">
+                    Open-Ended Questions
+                    <div style="font-size: 0.85rem; margin-top: 0.25rem; opacity: 0.9;">Written responses with AI evaluation</div>
+                </button>
+                <button class="btn-secondary" onclick="startMCQExam()" style="min-width: 200px;">
+                    Multiple Choice
+                    <div style="font-size: 0.85rem; margin-top: 0.25rem; opacity: 0.9;">15 questions with instant feedback</div>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function startOpenEndedExam() {
+    window.currentExamMode = 'open-ended';
+    renderExamInterface();
+}
+
+function startMCQExam() {
+    window.currentExamMode = 'mcq';
+    window.currentExamMCQIndex = 0;
+    window.examMCQScore = 0;
+    window.examMCQAttempted = 0;
+    window.examMCQAnswered = false;
+    renderExamMCQInterface();
+}
+
 function renderExamInterface() {
     const currentQuestion = window.examQuestions[window.currentExamIndex];
     
-    // Check if it's an MCQ (has A), B), C), D) options)
-    const isMCQ = /[A-D]\)/.test(currentQuestion);
+    // Open-ended question only
+    window.currentExamType = 'open';
     
-    let questionHTML = '';
-    
-    if (isMCQ) {
-        // Parse MCQ
-        const lines = currentQuestion.split('\n');
-        const questionText = lines[0];
-        const options = lines.filter(line => /^[A-D]\)/.test(line.trim()));
-        const correctMatch = currentQuestion.match(/CORRECT:\s*([A-D])/i);
-        const correctAnswer = correctMatch ? correctMatch[1].toUpperCase() : '';
-        
-        // Store correct answer for later validation
-        window.currentExamCorrect = correctAnswer;
-        window.currentExamType = 'mcq';
-        
-        questionHTML = `
-            <h4>Question ${window.currentExamIndex + 1}</h4>
-            <p>${convertMarkdownToHTML(questionText)}</p>
-            <div class="mcq-options" id="examMCQOptions">
-                ${options.map((opt, idx) => {
-                    const letter = String.fromCharCode(65 + idx); // A, B, C, D
-                    const text = opt.replace(/^[A-D]\)\s*/, '');
-                    return `<div class="mcq-option" data-answer="${letter}" onclick="selectExamMCQ('${letter}')">${opt}</div>`;
-                }).join('')}
+    elements.contentRenderer.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+            <button class="btn-secondary" onclick="renderExamModeSelection()">← Back to Exam Types</button>
+            <div style="color: var(--text-secondary);">
+                Question ${window.currentExamIndex + 1} of ∞
             </div>
-            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
-                <button class="btn-primary" style="flex: 1;" onclick="submitCurrentExamAnswer()">Submit Answer</button>
-                <button class="btn-secondary" onclick="skipExamQuestion()">Skip →</button>
+            <div style="background: var(--bg-card); padding: 0.75rem 1.5rem; border: 2px solid var(--border); font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">
+                Score: ${window.examScore}/${window.examAttempted} ${window.examAttempted > 0 ? `(${Math.round((window.examScore / window.examAttempted) * 100)}%)` : '(0%)'}
             </div>
-        `;
-    } else {
-        // Open-ended question
-        window.currentExamType = 'open';
-        questionHTML = `
+        </div>
+        <div class="exam-question">
             <h4>Question ${window.currentExamIndex + 1}</h4>
             <p>${convertMarkdownToHTML(currentQuestion)}</p>
             <textarea placeholder="Your answer..." rows="6" id="currentExamAnswer"></textarea>
@@ -398,23 +491,151 @@ function renderExamInterface() {
                 <button class="btn-primary" style="flex: 1;" onclick="submitCurrentExamAnswer()">Submit Answer</button>
                 <button class="btn-secondary" onclick="skipExamQuestion()">Skip →</button>
             </div>
-        `;
-    }
-    
-    elements.contentRenderer.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-            <div style="color: var(--text-secondary);">
-                Question ${window.currentExamIndex + 1} of ∞
-            </div>
-            <div style="background: var(--bg-card); padding: 0.75rem 1.5rem; border-radius: 8px; border: 2px solid var(--border); font-weight: 600;">
-                Score: ${window.examScore}/${window.examAttempted} ${window.examAttempted > 0 ? `(${Math.round((window.examScore / window.examAttempted) * 100)}%)` : '(0%)'}
-            </div>
-        </div>
-        <div class="exam-question">
-            ${questionHTML}
             <div id="currentExamFeedback" class="exam-feedback hidden"></div>
         </div>
     `;
+}
+
+function renderExamMCQInterface() {
+    // Check if exam is complete
+    if (window.currentExamMCQIndex >= window.examMCQs.length) {
+        showMCQFinalScore();
+        return;
+    }
+    
+    const mcq = window.examMCQs[window.currentExamMCQIndex];
+    const totalQuestions = window.examMCQs.length;
+    
+    elements.contentRenderer.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+            <button class="btn-secondary" onclick="renderExamModeSelection()">← Back to Exam Types</button>
+            <div style="color: var(--text-secondary);">
+                Question ${window.currentExamMCQIndex + 1} of ${totalQuestions}
+            </div>
+            <div style="background: var(--bg-card); padding: 0.75rem 1.5rem; border: 2px solid var(--border); font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">
+                Score: ${window.examMCQScore}/${totalQuestions} (${Math.round((window.examMCQScore / totalQuestions) * 100)}%)
+            </div>
+        </div>
+        <div class="exam-question">
+            <h4>Question ${window.currentExamMCQIndex + 1}</h4>
+            <p>${convertMarkdownToHTML(mcq.question)}</p>
+            <div class="mcq-options" id="examMCQOptions">
+                ${mcq.options.map((opt, idx) => `
+                    <div class="mcq-option" data-option="${opt.charAt(0)}" onclick="selectExamMCQOption(${idx})">
+                        ${opt}
+                    </div>
+                `).join('')}
+            </div>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button class="btn-primary" style="flex: 1;" onclick="submitExamMCQAnswer()">Submit Answer</button>
+                <button class="btn-secondary" onclick="skipExamMCQQuestion()">Skip →</button>
+            </div>
+            <div id="examMCQFeedback" class="exam-feedback hidden"></div>
+        </div>
+    `;
+}
+
+function showMCQFinalScore() {
+    const totalQuestions = window.examMCQs.length;
+    const percentage = Math.round((window.examMCQScore / totalQuestions) * 100);
+    
+    elements.contentRenderer.innerHTML = `
+        <div style="text-align: center; padding: 3rem;">
+            <h2 style="font-size: 3rem; margin-bottom: 1rem; text-transform: uppercase; letter-spacing: -2px;">Exam Complete!</h2>
+            <div style="font-size: 4rem; font-weight: bold; margin: 2rem 0; color: var(--accent);">
+                ${window.examMCQScore}/${totalQuestions}
+            </div>
+            <div style="font-size: 2rem; margin-bottom: 3rem; text-transform: uppercase; letter-spacing: 2px;">
+                ${percentage}% CORRECT
+            </div>
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+                <button class="btn-primary" onclick="retakeMCQExam()" style="min-width: 200px;">
+                    Retake Exam
+                </button>
+                <button class="btn-secondary" onclick="renderExamModeSelection()" style="min-width: 200px;">
+                    Back to Exam Types
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function retakeMCQExam() {
+    window.currentExamMCQIndex = 0;
+    window.examMCQScore = 0;
+    window.examMCQAttempted = 0;
+    window.examMCQAnswered = false;
+    renderExamMCQInterface();
+}
+
+function selectExamMCQOption(optionIndex) {
+    if (window.examMCQAnswered) return;
+    
+    document.querySelectorAll('#examMCQOptions .mcq-option').forEach(opt => opt.classList.remove('selected'));
+    const options = document.querySelectorAll('#examMCQOptions .mcq-option');
+    options[optionIndex].classList.add('selected');
+    window.examMCQSelectedOption = options[optionIndex].dataset.option;
+}
+
+function submitExamMCQAnswer() {
+    if (window.examMCQAnswered) {
+        // Move to next question
+        nextExamMCQQuestion();
+        return;
+    }
+    
+    const mcq = window.examMCQs[window.currentExamMCQIndex];
+    const feedback = document.getElementById('examMCQFeedback');
+    const submitBtn = document.querySelector('.exam-question .btn-primary');
+    
+    if (!window.examMCQSelectedOption) {
+        feedback.textContent = 'Please select an answer';
+        feedback.classList.remove('hidden');
+        return;
+    }
+    
+    window.examMCQAnswered = true;
+    window.examMCQAttempted++;
+    
+    const options = document.querySelectorAll('#examMCQOptions .mcq-option');
+    const isCorrect = window.examMCQSelectedOption === mcq.correct;
+    
+    if (isCorrect) {
+        window.examMCQScore++;
+        options.forEach(opt => {
+            opt.style.pointerEvents = 'none';
+            if (opt.dataset.option === mcq.correct) {
+                opt.classList.add('correct');
+            }
+        });
+        feedback.innerHTML = '<strong>CORRECT!</strong> Well done!';
+        feedback.classList.remove('hidden');
+    } else {
+        options.forEach(opt => {
+            opt.style.pointerEvents = 'none';
+            if (opt.dataset.option === mcq.correct) {
+                opt.classList.add('correct');
+            } else if (opt.dataset.option === window.examMCQSelectedOption) {
+                opt.classList.add('incorrect');
+            }
+        });
+        feedback.innerHTML = `<strong>INCORRECT.</strong> The correct answer is <strong>${mcq.correct}</strong>.<br><br>${convertMarkdownToHTML(mcq.explanation)}`;
+        feedback.classList.remove('hidden');
+    }
+    
+    submitBtn.textContent = 'Next Question →';
+}
+
+function nextExamMCQQuestion() {
+    window.currentExamMCQIndex++;
+    window.examMCQAnswered = false;
+    window.examMCQSelectedOption = null;
+    renderExamMCQInterface();
+}
+
+function skipExamMCQQuestion() {
+    window.examMCQAttempted++;
+    nextExamMCQQuestion();
 }
 
 function selectExamMCQ(letter) {
@@ -432,61 +653,22 @@ async function submitCurrentExamAnswer() {
     const feedbackElement = document.getElementById('currentExamFeedback');
     const submitBtn = document.querySelector('.exam-question .btn-primary');
     
-    let userAnswer = '';
-    let isCorrect = false;
+    // Open-ended question only
+    const answerTextarea = document.getElementById('currentExamAnswer');
+    const userAnswer = answerTextarea ? answerTextarea.value.trim() : '';
     
-    // Check if it's MCQ or open-ended
-    if (window.currentExamType === 'mcq') {
-        if (!window.currentExamSelected) {
-            feedbackElement.textContent = 'Please select an answer';
-            feedbackElement.classList.remove('hidden');
-            return;
-        }
-        
-        userAnswer = window.currentExamSelected;
-        isCorrect = (userAnswer === window.currentExamCorrect);
-        
-        // Show visual feedback on MCQ options
-        const options = document.querySelectorAll('#examMCQOptions .mcq-option');
-        options.forEach(opt => {
-            opt.style.pointerEvents = 'none';
-            if (opt.dataset.answer === window.currentExamCorrect) {
-                opt.classList.add('correct');
-            } else if (opt.dataset.answer === userAnswer && !isCorrect) {
-                opt.classList.add('incorrect');
-            }
-        });
-        
-        window.examAttempted++;
-        if (isCorrect) {
-            window.examScore++;
-        }
-        
-        feedbackElement.innerHTML = isCorrect 
-            ? '<strong>CORRECT!</strong> Well done!' 
-            : `<strong>INCORRECT.</strong> The correct answer is <strong>${window.currentExamCorrect}</strong>.`;
+    if (!userAnswer) {
+        feedbackElement.textContent = 'Please provide an answer';
         feedbackElement.classList.remove('hidden');
-        
-        submitBtn.textContent = 'Next Question →';
-        submitBtn.onclick = moveToNextExamQuestion;
-        
-    } else {
-        // Open-ended question
-        const answerTextarea = document.getElementById('currentExamAnswer');
-        userAnswer = answerTextarea ? answerTextarea.value.trim() : '';
-        
-        if (!userAnswer) {
-            feedbackElement.textContent = 'Please provide an answer';
-            feedbackElement.classList.remove('hidden');
-            return;
-        }
+        return;
+    }
 
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Evaluating...';
-        toggleLoadingScreen(true, 'Evaluating your answer...');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Evaluating...';
+    toggleLoadingScreen(true, 'Evaluating your answer...');
 
-        try {
-            const evaluationPrompt = `Review this exam answer. Do NOT include preamble text. Respond in this exact format:
+    try {
+        const evaluationPrompt = `Review this exam answer. Do NOT include preamble text. Respond in this exact format:
 
 RESULT: [CORRECT/PARTIALLY CORRECT/INCORRECT]
 
@@ -501,57 +683,58 @@ Student Answer: ${userAnswer}
 Context:
 ${processedMaterial.combined}`;
 
-            const feedback = await callGeminiAPI(evaluationPrompt, []);
-            
-            isCorrect = feedback.toUpperCase().includes('RESULT: CORRECT') && 
-                             !feedback.toUpperCase().includes('RESULT: PARTIALLY') &&
-                             !feedback.toUpperCase().includes('RESULT: INCORRECT');
-            
-            window.examAttempted++;
-            if (isCorrect) {
-                window.examScore++;
-            }
-            
-            feedbackElement.innerHTML = `${convertMarkdownToHTML(feedback)}`;
-            feedbackElement.classList.remove('hidden');
-            
-            submitBtn.textContent = 'Next Question →';
-            submitBtn.onclick = moveToNextExamQuestion;
-            
-        } catch (error) {
-            feedbackElement.innerHTML = `<span style="color: var(--danger);">Error: ${error.message}</span>`;
-            feedbackElement.classList.remove('hidden');
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Submit Answer';
-        } finally {
-            toggleLoadingScreen(false);
+        const feedback = await callGeminiAPI(evaluationPrompt, []);
+        
+        const isCorrect = feedback.toUpperCase().includes('RESULT: CORRECT') && 
+                         !feedback.toUpperCase().includes('RESULT: PARTIALLY') &&
+                         !feedback.toUpperCase().includes('RESULT: INCORRECT');
+        
+        window.examAttempted++;
+        if (isCorrect) {
+            window.examScore++;
         }
+        
+        feedbackElement.innerHTML = `${convertMarkdownToHTML(feedback)}`;
+        feedbackElement.classList.remove('hidden');
+        
+        submitBtn.textContent = 'Next Question →';
+        submitBtn.onclick = moveToNextExamQuestion;
+        
+    } catch (error) {
+        feedbackElement.innerHTML = `<span style="color: var(--danger);">Error: ${error.message}</span>`;
+        feedbackElement.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Answer';
+    } finally {
+        toggleLoadingScreen(false);
     }
 }
 
 async function moveToNextExamQuestion() {
     window.currentExamIndex++;
     
-    if (window.currentExamIndex >= window.examQuestions.length) {
+    // Check if we need to generate more questions (when we're near the end)
+    if (window.currentExamIndex >= window.examQuestions.length - 2) {
         toggleLoadingScreen(true, 'Generating more questions...');
         
         try {
-            const examPrompt = `Generate 5 MORE challenging questions (mix of open-ended and multiple choice) that are DIFFERENT from previous ones.
+            const examPrompt = `Generate 5 MORE challenging open-ended questions that are DIFFERENT from previous ones.
 
 Content:
 ${processedMaterial.combined}
 
-For OPEN-ENDED questions, format as:
-Q[number]: [question text]
----
+CRITICAL: Separate each question with --- on a new line.
 
-For MULTIPLE CHOICE questions, format as:
-Q[number]: [question text]
-A) [option]
-B) [option]
-C) [option]
-D) [option]
-CORRECT: [letter]
+Format EXACTLY as:
+Q1: [question text]
+---
+Q2: [question text]
+---
+Q3: [question text]
+---
+Q4: [question text]
+---
+Q5: [question text]
 ---
 
 Do NOT include any preamble text. Just provide the questions directly.`;
@@ -569,11 +752,39 @@ Do NOT include any preamble text. Just provide the questions directly.`;
                 cleanedResponse = cleanedResponse.replace(pattern, '');
             });
             
-            const newQuestions = cleanedResponse.split('---').filter(q => q.trim()).map(q => q.replace(/Q\d+:\s*/, '').trim());
+            // Parse questions - handle both --- separator and Q1:/Q2: format
+            let newQuestions = [];
+            if (cleanedResponse.includes('---')) {
+                newQuestions = cleanedResponse.split('---')
+                    .filter(q => q.trim())
+                    .map(q => {
+                        let cleaned = q.replace(/Q\d+:\s*/i, '').trim();
+                        // Stop at first MCQ-style option
+                        const mcqMatch = cleaned.match(/\n[A-D]\)/);
+                        if (mcqMatch) {
+                            cleaned = cleaned.substring(0, mcqMatch.index).trim();
+                        }
+                        return cleaned;
+                    });
+            } else {
+                const questionMatches = cleanedResponse.match(/Q\d+:[\s\S]*?(?=Q\d+:|$)/gi);
+                if (questionMatches) {
+                    newQuestions = questionMatches.map(q => {
+                        let cleaned = q.replace(/Q\d+:\s*/i, '').trim();
+                        // Stop at first MCQ-style option
+                        const mcqMatch = cleaned.match(/\n[A-D]\)/);
+                        if (mcqMatch) {
+                            cleaned = cleaned.substring(0, mcqMatch.index).trim();
+                        }
+                        return cleaned;
+                    });
+                }
+            }
             
-            window.examQuestions.push(...newQuestions);
+            window.examQuestions.push(...newQuestions.filter(q => q.length > 0));
         } catch (error) {
             elements.contentRenderer.innerHTML = `<p style="color: var(--danger);">Error generating more questions: ${error.message}</p>`;
+            toggleLoadingScreen(false);
             return;
         } finally {
             toggleLoadingScreen(false);
@@ -586,22 +797,27 @@ Do NOT include any preamble text. Just provide the questions directly.`;
 function skipExamQuestion() {
     window.currentExamIndex++;
     
-    if (window.currentExamIndex >= window.examQuestions.length) {
+    // Check if we need to generate more questions (when we're near the end)
+    if (window.currentExamIndex >= window.examQuestions.length - 2) {
         toggleLoadingScreen(true, 'Generating more questions...');
         
-        callGeminiAPI(`Generate 5 MORE challenging questions (mix of open-ended and multiple choice) that are DIFFERENT from previous ones.
+        callGeminiAPI(`Generate 5 MORE challenging open-ended questions that are DIFFERENT from previous ones.
 
 Content:
 ${processedMaterial.combined}
 
-For OPEN-ENDED: Q[number]: [question]
+CRITICAL: Separate each question with --- on a new line.
+
+Format EXACTLY as:
+Q1: [question]
 ---
-For MULTIPLE CHOICE: Q[number]: [question]
-A) [option]
-B) [option]
-C) [option]
-D) [option]
-CORRECT: [letter]
+Q2: [question]
+---
+Q3: [question]
+---
+Q4: [question]
+---
+Q5: [question]
 ---
 
 No preamble text.`, processedMaterial.files)
@@ -617,8 +833,36 @@ No preamble text.`, processedMaterial.files)
                     cleanedResponse = cleanedResponse.replace(pattern, '');
                 });
                 
-                const newQuestions = cleanedResponse.split('---').filter(q => q.trim()).map(q => q.replace(/Q\d+:\s*/, '').trim());
-                window.examQuestions.push(...newQuestions);
+                // Parse questions - handle both --- separator and Q1:/Q2: format
+                let newQuestions = [];
+                if (cleanedResponse.includes('---')) {
+                    newQuestions = cleanedResponse.split('---')
+                        .filter(q => q.trim())
+                        .map(q => {
+                            let cleaned = q.replace(/Q\d+:\s*/i, '').trim();
+                            // Stop at first MCQ-style option
+                            const mcqMatch = cleaned.match(/\n[A-D]\)/);
+                            if (mcqMatch) {
+                                cleaned = cleaned.substring(0, mcqMatch.index).trim();
+                            }
+                            return cleaned;
+                        });
+                } else {
+                    const questionMatches = cleanedResponse.match(/Q\d+:[\s\S]*?(?=Q\d+:|$)/gi);
+                    if (questionMatches) {
+                        newQuestions = questionMatches.map(q => {
+                            let cleaned = q.replace(/Q\d+:\s*/i, '').trim();
+                            // Stop at first MCQ-style option
+                            const mcqMatch = cleaned.match(/\n[A-D]\)/);
+                            if (mcqMatch) {
+                                cleaned = cleaned.substring(0, mcqMatch.index).trim();
+                            }
+                            return cleaned;
+                        });
+                    }
+                }
+                
+                window.examQuestions.push(...newQuestions.filter(q => q.length > 0));
                 renderExamInterface();
             })
             .catch(error => {
@@ -636,11 +880,9 @@ async function generateFlashcards() {
     toggleLoadingScreen(true, 'Creating flashcards...');
 
     try {
-        const flashcardPrompt = `Create 15 flashcards from this content. For each card:
+        const flashcardPrompt = `Create 30 flashcards from this content. For each card:
 - Front: A question or term
 - Back: The answer or definition
-
-Also create 15 multiple choice questions with 4 options each, marking the correct answer with explanation.
 
 Content:
 ${processedMaterial.combined}
@@ -653,23 +895,11 @@ CARD2-FRONT: [question]
 CARD2-BACK: [answer]
 ---
 
-Format MCQs as:
-MCQ1: [question]
-A) [option]
-B) [option]
-C) [option]
-D) [option]
-CORRECT: [A/B/C/D]
-EXPLANATION: [why this is correct]
----`;
+Do NOT include any preamble text.`;
 
         const response = await callGeminiAPI(flashcardPrompt, processedMaterial.files);
         
-        const parts = response.split('MCQ1:');
-        const flashcardSection = parts[0];
-        const mcqSection = parts[1] ? 'MCQ1:' + parts[1] : '';
-
-        const flashcards = flashcardSection
+        const flashcards = response
             .split('---')
             .filter(card => card.trim())
             .map(card => {
@@ -677,26 +907,11 @@ EXPLANATION: [why this is correct]
                 const front = lines.find(l => l.includes('FRONT:'))?.split('FRONT:')[1]?.trim() || '';
                 const back = lines.find(l => l.includes('BACK:'))?.split('BACK:')[1]?.trim() || '';
                 return { front, back };
-            });
-
-        const mcqs = mcqSection
-            .split('---')
-            .filter(q => q.trim())
-            .map(q => {
-                const lines = q.split('\n').filter(l => l.trim());
-                const question = lines[0]?.replace(/MCQ\d+:\s*/, '').trim() || '';
-                const options = lines.filter(l => /^[A-D]\)/.test(l.trim()));
-                const correct = lines.find(l => l.includes('CORRECT:'))?.split('CORRECT:')[1]?.trim() || '';
-                const explanation = lines.find(l => l.includes('EXPLANATION:'))?.split('EXPLANATION:')[1]?.trim() || '';
-                return { question, options, correct, explanation };
-            });
+            })
+            .filter(card => card.front && card.back);
 
         window.flashcardData = flashcards;
-        window.mcqData = mcqs;
         window.currentCardIndex = 0;
-        window.currentMCQIndex = 0;
-        window.mcqScore = 0;
-        window.mcqAttempted = 0;
 
         renderFlashcardInterface();
     } catch (error) {
@@ -707,68 +922,21 @@ EXPLANATION: [why this is correct]
 }
 
 function renderFlashcardInterface() {
-    elements.contentRenderer.innerHTML = `
-        <div class="flashcard-container">
-            <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <div style="text-align: center; flex: 1;">
-                    <button class="btn-secondary" onclick="switchToFlashcards()">Flashcards</button>
-                    <button class="btn-secondary" onclick="switchToMCQ()">Multiple Choice</button>
-                </div>
-                <div id="scoreDisplay"></div>
-            </div>
-            <div id="flashcardView"></div>
-        </div>
-    `;
-    
-    switchToFlashcards();
-}
-
-function switchToFlashcards() {
-    const view = document.getElementById('flashcardView');
     const card = window.flashcardData[window.currentCardIndex];
     
-    updateScoreDisplay();
-    
-    view.innerHTML = `
-        <div style="text-align: center; color: var(--text-secondary); margin-bottom: 1rem;">
-            Flashcard ${window.currentCardIndex + 1} of ${window.flashcardData.length}
-        </div>
-        <div class="flashcard" onclick="flipCard()" id="currentCard">
-            <div class="flashcard-content" id="cardContent">${card.front}</div>
-        </div>
-        <div class="flashcard-controls">
-            <button class="btn-secondary" onclick="previousCard()">← Previous</button>
-            <button class="btn-primary" onclick="flipCard()">Flip Card</button>
-            <button class="btn-secondary" onclick="nextCard()">Next →</button>
-        </div>
-    `;
-}
-
-function switchToMCQ() {
-    const view = document.getElementById('flashcardView');
-    const mcq = window.mcqData[window.currentMCQIndex];
-    
-    updateScoreDisplay();
-    
-    view.innerHTML = `
-        <div style="text-align: center; color: var(--text-secondary); margin-bottom: 1rem;">
-            Question ${window.currentMCQIndex + 1} of ${window.mcqData.length}
-        </div>
-        <div style="background: var(--bg-card); padding: 2rem; border-radius: 12px; border: 2px solid var(--border);">
-            <h3 style="margin-bottom: 1.5rem; color: var(--primary);">${mcq.question}</h3>
-            <div class="mcq-options" id="mcqOptions">
-                ${mcq.options.map((opt, idx) => `
-                    <div class="mcq-option" onclick="selectMCQOption(${idx})" data-option="${opt.charAt(0)}">
-                        ${opt}
-                    </div>
-                `).join('')}
+    elements.contentRenderer.innerHTML = `
+        <div class="flashcard-container">
+            <div style="text-align: center; color: var(--text-secondary); margin-bottom: 1rem;">
+                Flashcard ${window.currentCardIndex + 1} of ${window.flashcardData.length}
             </div>
-            <button class="btn-primary" style="margin-top: 1rem; width: 100%;" onclick="submitMCQAnswer()">Submit Answer</button>
-            <div id="mcqFeedback" style="margin-top: 1rem;"></div>
-        </div>
-        <div class="flashcard-controls" style="margin-top: 1rem;">
-            <button class="btn-secondary" onclick="previousMCQ()">← Previous</button>
-            <button class="btn-secondary" onclick="nextMCQ()">Next →</button>
+            <div class="flashcard" onclick="flipCard()" id="currentCard">
+                <div class="flashcard-content" id="cardContent">${card.front}</div>
+            </div>
+            <div class="flashcard-controls">
+                <button class="btn-secondary" onclick="previousCard()">← Previous</button>
+                <button class="btn-primary" onclick="flipCard()">Flip Card</button>
+                <button class="btn-secondary" onclick="nextCard()">Next →</button>
+            </div>
         </div>
     `;
 }
@@ -787,70 +955,17 @@ function flipCard() {
 function nextCard() {
     window.currentCardIndex = (window.currentCardIndex + 1) % window.flashcardData.length;
     cardFlipped = false;
-    switchToFlashcards();
+    renderFlashcardInterface();
 }
 
 function previousCard() {
     window.currentCardIndex = (window.currentCardIndex - 1 + window.flashcardData.length) % window.flashcardData.length;
     cardFlipped = false;
-    switchToFlashcards();
+    renderFlashcardInterface();
 }
 
-let selectedOption = null;
-let mcqAnswered = false;
-
-function selectMCQOption(optionIndex) {
-    if (mcqAnswered) return;
-    
-    document.querySelectorAll('.mcq-option').forEach(opt => opt.classList.remove('selected'));
-    const options = document.querySelectorAll('.mcq-option');
-    options[optionIndex].classList.add('selected');
-    selectedOption = options[optionIndex].dataset.option;
-}
-
-function submitMCQAnswer() {
-    if (mcqAnswered) return;
-    
-    const mcq = window.mcqData[window.currentMCQIndex];
-    const feedback = document.getElementById('mcqFeedback');
-    
-    if (!selectedOption) {
-        feedback.innerHTML = '<p style="color: var(--warning);">Please select an option</p>';
-        return;
-    }
-
-    mcqAnswered = true;
-    window.mcqAttempted++;
-
-    const options = document.querySelectorAll('.mcq-option');
-    const isCorrect = selectedOption === mcq.correct;
-    
-    if (isCorrect) {
-        window.mcqScore++;
-        options.forEach(opt => {
-            if (opt.dataset.option === mcq.correct) {
-                opt.classList.add('correct');
-            }
-        });
-        feedback.innerHTML = '<p style="color: var(--success); font-weight: 600;">✓ Correct!</p>';
-    } else {
-        options.forEach(opt => {
-            if (opt.dataset.option === mcq.correct) {
-                opt.classList.add('correct');
-            } else if (opt.dataset.option === selectedOption) {
-                opt.classList.add('incorrect');
-            }
-        });
-        feedback.innerHTML = `<p style="color: var(--danger); font-weight: 600;">✗ Incorrect</p><p style="margin-top: 0.5rem;">${convertMarkdownToHTML(mcq.explanation)}</p>`;
-    }
-    
-    updateScoreDisplay();
-}
-
-function nextMCQ() {
-    window.currentMCQIndex = (window.currentMCQIndex + 1) % window.mcqData.length;
-    selectedOption = null;
-    mcqAnswered = false;
+async function callGeminiAPI(promptText, fileReferences = []) {
+    const apiToken = localStorage.getItem(storageIdentifier);
     switchToMCQ();
 }
 
@@ -941,6 +1056,10 @@ function convertMarkdownToHTML(text) {
     
     html = html.replace(/`(.+?)`/g, '<code style="background: var(--bg-hover); padding: 0.2rem 0.4rem; border-radius: 4px; font-family: monospace;">$1</code>');
     
+    // Handle headings - process from h6 to h1 (most specific to least specific)
+    html = html.replace(/^###### (.+)$/gm, '<h6 style="font-size: 0.95rem; font-weight: bold; margin: 0.75rem 0 0.5rem 0;">$1</h6>');
+    html = html.replace(/^##### (.+)$/gm, '<h5 style="font-size: 1rem; font-weight: bold; margin: 0.75rem 0 0.5rem 0;">$1</h5>');
+    html = html.replace(/^#### (.+)$/gm, '<h4 style="font-size: 1.1rem; font-weight: bold; margin: 1rem 0 0.5rem 0;">$1</h4>');
     html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
     html = html.replace(/^# (.+)$/gm, '<h3>$1</h3>');
@@ -1013,14 +1132,16 @@ function toggleLoadingScreen(show, message = 'Processing...') {
 window.flipCard = flipCard;
 window.nextCard = nextCard;
 window.previousCard = previousCard;
-window.switchToFlashcards = switchToFlashcards;
-window.switchToMCQ = switchToMCQ;
-window.selectMCQOption = selectMCQOption;
-window.submitMCQAnswer = submitMCQAnswer;
-window.nextMCQ = nextMCQ;
-window.previousMCQ = previousMCQ;
 window.submitCurrentExamAnswer = submitCurrentExamAnswer;
 window.moveToNextExamQuestion = moveToNextExamQuestion;
 window.skipExamQuestion = skipExamQuestion;
+window.startOpenEndedExam = startOpenEndedExam;
+window.startMCQExam = startMCQExam;
+window.renderExamModeSelection = renderExamModeSelection;
+window.selectExamMCQOption = selectExamMCQOption;
+window.submitExamMCQAnswer = submitExamMCQAnswer;
+window.nextExamMCQQuestion = nextExamMCQQuestion;
+window.skipExamMCQQuestion = skipExamMCQQuestion;
+window.retakeMCQExam = retakeMCQExam;
 
 document.addEventListener('DOMContentLoaded', initializeApplication);
