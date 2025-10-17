@@ -546,6 +546,50 @@ textarea:focus {
     list-style-type: decimal;
 }
 
+.study-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5rem 0;
+    background: #FFFFFF;
+    background-color: #FFFFFF;
+    border: 3px solid #000000;
+}
+
+.study-content thead {
+    background: #000000;
+    background-color: #000000;
+    color: #FFFFFF;
+}
+
+.study-content th,
+.study-content td {
+    padding: 1rem;
+    text-align: left;
+    border: 2px solid #000000;
+    font-family: 'Courier New', monospace;
+}
+
+.study-content th {
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 0.9rem;
+}
+
+.study-content td {
+    font-size: 0.95rem;
+}
+
+.study-content tbody tr:nth-child(even) {
+    background: #F5F5F0;
+    background-color: #F5F5F0;
+}
+
+.study-content tbody tr:hover {
+    background: #FFEB3B;
+    background-color: #FFEB3B;
+}
+
 .exam-question {
     background: #FFFFFF;
     background-color: #FFFFFF;

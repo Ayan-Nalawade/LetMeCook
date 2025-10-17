@@ -1048,9 +1048,9 @@ async function callGeminiAPI(promptText, fileReferences = []) {
 function convertMarkdownToHTML(text) {
     if (!text) return '';
     
-    // Step 1: Temporarily protect HTML tags we want to preserve (sub, sup, br, etc.)
+    // Step 1: Temporarily protect HTML tags we want to preserve (including table tags)
     const protectedTags = [];
-    let html = text.replace(/(<\/?(?:sub|sup|br|hr|span|div|strong|em|code|pre|ul|ol|li|h[1-6])[^>]*>)/gi, (match) => {
+    let html = text.replace(/(<\/?(?:table|thead|tbody|tr|td|th|sub|sup|br|hr|span|div|strong|em|code|pre|ul|ol|li|h[1-6])[^>]*>)/gi, (match) => {
         protectedTags.push(match);
         return `___PROTECTED_${protectedTags.length - 1}___`;
     });
@@ -1066,7 +1066,13 @@ function convertMarkdownToHTML(text) {
         return protectedTags[parseInt(index)];
     });
     
-    // Step 4: Process markdown formatting
+    // Step 4: Convert ^ notation to superscript (e.g., x^2 or ^(x-h))
+    // Handle ^(content) first
+    html = html.replace(/\^\(([^)]+)\)/g, '<sup>$1</sup>');
+    // Then handle ^x for single characters
+    html = html.replace(/\^(\w)/g, '<sup>$1</sup>');
+    
+    // Step 5: Process markdown formatting
     html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
