@@ -1046,8 +1046,15 @@ async function callGeminiAPI(promptText, fileReferences = []) {
 }
 
 function convertMarkdownToHTML(text) {
-    let html = text;
+    if (!text) return '';
     
+    // First, escape HTML entities to prevent issues with <, >, & characters
+    let html = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    
+    // Then process markdown (which will create HTML tags we want to keep)
     html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
