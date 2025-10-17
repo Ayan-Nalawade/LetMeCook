@@ -281,6 +281,8 @@ async function generateStudyMaterial() {
 3. Important definitions
 4. Summary of critical information
 
+Use markdown formatting for better readability (bold, italics, lists, etc.).
+
 Content to analyze:
 ${processedMaterial.combined}`;
 
@@ -288,7 +290,7 @@ ${processedMaterial.combined}`;
         
         elements.contentRenderer.innerHTML = `
             <div class="study-content">
-                ${formatStudyContent(response)}
+                ${convertMarkdownToHTML(response)}
             </div>
         `;
     } catch (error) {
@@ -319,21 +321,12 @@ Q2: [question]
         const response = await callGeminiAPI(examPrompt, processedMaterial.files);
         const questions = response.split('---').filter(q => q.trim());
         
-        let examHTML = '<div class="exam-questions">';
-        questions.forEach((question, index) => {
-            examHTML += `
-                <div class="exam-question" data-index="${index}">
-                    <h4>Question ${index + 1}</h4>
-                    <p>${question.replace(/Q\d+:\s*/, '').trim()}</p>
-                    <textarea placeholder="Your answer..." rows="4" id="answer-${index}"></textarea>
-                    <button class="btn-primary" onclick="checkExamAnswer(${index})">Submit Answer</button>
-                    <div id="feedback-${index}" class="exam-feedback hidden"></div>
-                </div>
-            `;
-        });
-        examHTML += '</div>';
+        window.examQuestions = questions.map(q => q.replace(/Q\d+:\s*/, '').trim());
+        window.currentExamIndex = 0;
+        window.examScore = 0;
+        window.examAttempted = 0;
         
-        elements.contentRenderer.innerHTML = examHTML;
+        renderExamInterface();
     } catch (error) {
         elements.contentRenderer.innerHTML = `<p style="color: var(--danger);">Error: ${error.message}</p>`;
     } finally {
@@ -341,9 +334,35 @@ Q2: [question]
     }
 }
 
-async function checkExamAnswer(questionIndex) {
-    const userAnswer = document.getElementById(`answer-${questionIndex}`).value.trim();
-    const feedbackElement = document.getElementById(`feedback-${questionIndex}`);
+function renderExamInterface() {
+    const currentQuestion = window.examQuestions[window.currentExamIndex];
+    
+    elements.contentRenderer.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+            <div style="color: var(--text-secondary);">
+                Question ${window.currentExamIndex + 1} of ∞
+            </div>
+            <div style="background: var(--bg-card); padding: 0.75rem 1.5rem; border-radius: 8px; border: 2px solid var(--border); font-weight: 600;">
+                Score: ${window.examScore}/${window.examAttempted} ${window.examAttempted > 0 ? `(${Math.round((window.examScore / window.examAttempted) * 100)}%)` : '(0%)'}
+            </div>
+        </div>
+        <div class="exam-question">
+            <h4>Question ${window.currentExamIndex + 1}</h4>
+            <p>${convertMarkdownToHTML(currentQuestion)}</p>
+            <textarea placeholder="Your answer..." rows="6" id="currentExamAnswer"></textarea>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button class="btn-primary" style="flex: 1;" onclick="submitCurrentExamAnswer()">Submit Answer</button>
+                <button class="btn-secondary" onclick="skipExamQuestion()">Skip →</button>
+            </div>
+            <div id="currentExamFeedback" class="exam-feedback hidden"></div>
+        </div>
+    `;
+}
+
+async function submitCurrentExamAnswer() {
+    const userAnswer = document.getElementById('currentExamAnswer').value.trim();
+    const feedbackElement = document.getElementById('currentExamFeedback');
+    const submitBtn = document.querySelector('.exam-question .btn-primary');
     
     if (!userAnswer) {
         feedbackElement.textContent = 'Please provide an answer';
@@ -351,32 +370,115 @@ async function checkExamAnswer(questionIndex) {
         return;
     }
 
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Evaluating...';
     toggleLoadingScreen(true, 'Evaluating your answer...');
 
     try {
-        const evaluationPrompt = `Review this exam answer. If the answer is CORRECT, just say "Correct!" and briefly explain why it's right.
+        const evaluationPrompt = `Review this exam answer. Respond in this exact format:
 
-If the answer is INCORRECT or PARTIALLY CORRECT, provide:
-1. What's wrong or missing in their answer (be specific and concise)
-2. The correct answer with explanation
+RESULT: [CORRECT/PARTIALLY CORRECT/INCORRECT]
 
-Do NOT repeat what they got right. Only focus on what's wrong or missing.
+If CORRECT: Briefly explain why it's right (2-3 sentences).
+If INCORRECT or PARTIALLY CORRECT: 
+- What's wrong or missing (be specific)
+- The correct answer with explanation
 
-Question: ${document.querySelector(`[data-index="${questionIndex}"] p`).textContent}
+Question: ${window.examQuestions[window.currentExamIndex]}
 Student Answer: ${userAnswer}
 
-Original Content Context:
+Context:
 ${processedMaterial.combined}`;
 
         const feedback = await callGeminiAPI(evaluationPrompt, []);
         
-        feedbackElement.innerHTML = `<strong>Feedback:</strong><br>${convertMarkdownToHTML(feedback)}`;
+        const isCorrect = feedback.toUpperCase().includes('RESULT: CORRECT') && 
+                         !feedback.toUpperCase().includes('RESULT: PARTIALLY') &&
+                         !feedback.toUpperCase().includes('RESULT: INCORRECT');
+        
+        window.examAttempted++;
+        if (isCorrect) {
+            window.examScore++;
+        }
+        
+        feedbackElement.innerHTML = `${convertMarkdownToHTML(feedback)}`;
         feedbackElement.classList.remove('hidden');
+        
+        submitBtn.textContent = 'Next Question →';
+        submitBtn.onclick = moveToNextExamQuestion;
+        
     } catch (error) {
         feedbackElement.innerHTML = `<span style="color: var(--danger);">Error: ${error.message}</span>`;
         feedbackElement.classList.remove('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Answer';
     } finally {
         toggleLoadingScreen(false);
+    }
+}
+
+async function moveToNextExamQuestion() {
+    window.currentExamIndex++;
+    
+    if (window.currentExamIndex >= window.examQuestions.length) {
+        toggleLoadingScreen(true, 'Generating more questions...');
+        
+        try {
+            const examPrompt = `Based on this content, generate 5 MORE challenging exam-style questions that are DIFFERENT from previous ones. Focus on different aspects and concepts.
+
+Content:
+${processedMaterial.combined}
+
+Format your response as:
+Q1: [question]
+---
+Q2: [question]
+---
+(etc.)`;
+
+            const response = await callGeminiAPI(examPrompt, processedMaterial.files);
+            const newQuestions = response.split('---').filter(q => q.trim()).map(q => q.replace(/Q\d+:\s*/, '').trim());
+            
+            window.examQuestions.push(...newQuestions);
+        } catch (error) {
+            elements.contentRenderer.innerHTML = `<p style="color: var(--danger);">Error generating more questions: ${error.message}</p>`;
+            return;
+        } finally {
+            toggleLoadingScreen(false);
+        }
+    }
+    
+    renderExamInterface();
+}
+
+function skipExamQuestion() {
+    window.currentExamIndex++;
+    
+    if (window.currentExamIndex >= window.examQuestions.length) {
+        toggleLoadingScreen(true, 'Generating more questions...');
+        
+        callGeminiAPI(`Based on this content, generate 5 MORE challenging exam-style questions that are DIFFERENT from previous ones.
+
+Content:
+${processedMaterial.combined}
+
+Format: Q1: [question]
+---
+Q2: [question]
+---`, processedMaterial.files)
+            .then(response => {
+                const newQuestions = response.split('---').filter(q => q.trim()).map(q => q.replace(/Q\d+:\s*/, '').trim());
+                window.examQuestions.push(...newQuestions);
+                renderExamInterface();
+            })
+            .catch(error => {
+                elements.contentRenderer.innerHTML = `<p style="color: var(--danger);">Error: ${error.message}</p>`;
+            })
+            .finally(() => {
+                toggleLoadingScreen(false);
+            });
+    } else {
+        renderExamInterface();
     }
 }
 
@@ -678,10 +780,6 @@ async function callGeminiAPI(promptText, fileReferences = []) {
     }
 }
 
-function formatStudyContent(rawText) {
-    return convertMarkdownToHTML(rawText);
-}
-
 function convertMarkdownToHTML(text) {
     let html = text;
     
@@ -771,6 +869,8 @@ window.selectMCQOption = selectMCQOption;
 window.submitMCQAnswer = submitMCQAnswer;
 window.nextMCQ = nextMCQ;
 window.previousMCQ = previousMCQ;
-window.checkExamAnswer = checkExamAnswer;
+window.submitCurrentExamAnswer = submitCurrentExamAnswer;
+window.moveToNextExamQuestion = moveToNextExamQuestion;
+window.skipExamQuestion = skipExamQuestion;
 
 document.addEventListener('DOMContentLoaded', initializeApplication);

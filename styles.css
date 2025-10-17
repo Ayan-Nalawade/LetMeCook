@@ -363,6 +363,24 @@ textarea:focus {
     line-height: 1.8;
 }
 
+.study-content strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.study-content em {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.study-content code {
+    background: var(--bg-hover);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.9em;
+}
+
 .study-content ul,
 .study-content ol {
     margin-left: 1.5rem;
@@ -371,18 +389,34 @@ textarea:focus {
 
 .study-content li {
     margin-bottom: 0.5rem;
+    line-height: 1.7;
+}
+
+.study-content ul li {
+    list-style-type: disc;
+}
+
+.study-content ol li {
+    list-style-type: decimal;
 }
 
 .exam-question {
     background: var(--bg-card);
-    padding: 1.5rem;
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
+    padding: 2rem;
+    border-radius: 12px;
     border: 2px solid var(--border);
+    max-width: 800px;
+    margin: 0 auto;
 }
 
 .exam-question h4 {
     color: var(--primary);
+    margin-bottom: 1rem;
+    font-size: 1.25rem;
+}
+
+.exam-question p {
+    line-height: 1.8;
     margin-bottom: 1rem;
 }
 
@@ -395,10 +429,19 @@ textarea:focus {
 }
 
 .exam-feedback {
-    margin-top: 1rem;
-    padding: 1rem;
+    margin-top: 1.5rem;
+    padding: 1.5rem;
     border-radius: 8px;
     background: var(--bg-dark);
+    line-height: 1.8;
+}
+
+.exam-feedback strong {
+    color: var(--primary);
+}
+
+.exam-feedback p {
+    margin-bottom: 0.75rem;
 }
 
 .flashcard-container {
