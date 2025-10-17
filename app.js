@@ -564,7 +564,7 @@ function renderFlashcardInterface() {
                     <button class="btn-secondary" onclick="switchToFlashcards()">Flashcards</button>
                     <button class="btn-secondary" onclick="switchToMCQ()">Multiple Choice</button>
                 </div>
-                <div id="scoreDisplay" style="background: var(--bg-card); padding: 0.75rem 1.5rem; border-radius: 8px; border: 2px solid var(--border); font-weight: 600;"></div>
+                <div id="scoreDisplay"></div>
             </div>
             <div id="flashcardView"></div>
         </div>

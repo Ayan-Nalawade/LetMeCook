@@ -12,7 +12,7 @@
             <h2>Welcome to LetMeCook</h2>
             <p>Enter your Gemini API key to get started</p>
             <input type="password" id="apiKeyInput" placeholder="Enter Gemini API Key">
-            <button id="validateApiKey">Validate & Continue</button>
+            <button type="button" id="validateApiKey">Validate &amp; Continue</button>
             <div id="validationStatus"></div>
             <p class="hint">Don't have a key? <a href="https://aistudio.google.com/app/apikey" target="_blank">Get one here</a></p>
         </div>
@@ -22,7 +22,7 @@
         <header>
             <h1>LetMeCook</h1>
             <div class="header-actions">
-                <button id="changeApiKey" class="btn-secondary">Change API Key</button>
+                <button type="button" id="changeApiKey" class="btn-secondary">Change API Key</button>
             </div>
         </header>
 
@@ -32,13 +32,13 @@
                 <div class="upload-area">
                     <input type="file" id="fileInput" accept=".pdf,.txt,.md,.html,.pptx,.pptm,.js,.py,.json,.csv,.xml" multiple>
                     <label for="fileInput" class="file-label">
-                        <span>Choose files or drag & drop</span>
+                        <span>Choose files or drag &amp; drop</span>
                         <small>PDF, TXT, MD, PPTX, and more (max 20MB each)</small>
                     </label>
                 </div>
                 <div class="divider">OR</div>
                 <textarea id="textInput" placeholder="Paste your study material here..." rows="8"></textarea>
-                <button id="processContent" class="btn-primary">Process Content</button>
+                <button type="button" id="processContent" class="btn-primary">Process Content</button>
                 <div id="uploadStatus"></div>
             </section>
 
@@ -46,7 +46,7 @@
                 <h2>Select Learning Mode</h2>
                 <div class="mode-cards">
                     <div class="mode-card" data-mode="study">
-                        <h3> Study Mode</h3>
+                        <h3>Study Mode</h3>
                         <p>Comprehensive learning with explanations and summaries</p>
                     </div>
                     <div class="mode-card" data-mode="exam">
@@ -54,7 +54,7 @@
                         <p>Test yourself with challenging questions</p>
                     </div>
                     <div class="mode-card" data-mode="flashcard">
-                        <h3> Flashcard Mode</h3>
+                        <h3>Flashcard Mode</h3>
                         <p>Quick recall with flashcards and multiple choice</p>
                     </div>
                 </div>
@@ -62,8 +62,8 @@
 
             <section id="contentArea" class="hidden">
                 <div class="content-header">
-                    <button id="backToModes" class="btn-secondary"> Back to Modes</button>
-                    <h2 id="currentModeTitle"></h2>
+                    <button type="button" id="backToModes" class="btn-secondary">← Back to Modes</button>
+                    <h2 id="currentModeTitle">Content Area</h2>
                 </div>
                 <div id="contentDisplay"></div>
             </section>
